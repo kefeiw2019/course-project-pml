@@ -1,0 +1,115 @@
+---
+title: "Coursera Pratical Machine Learning Course Final project"
+author: "Kefei Wang"
+date: "12/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Project Goal and Dataset
+The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+#### Load the libraries
+```{r Load basic library, warning=FALSE}
+library(caret)
+library(tidyverse)
+library(randomForest)
+```
+
+#### Read the Datasets
+```{r Read datasets, warning=FALSE}
+library(readr)
+pml_training.raw <- read_csv("pml-training.csv")
+pml_testing.raw <-read_csv("pml-testing.csv")
+```
+
+#### Initial dataset cleanup
+Remove irrelevant variables of first 7 columns: 
+```{r, Initial data cleanup}
+pml_training.clean01 <-pml_training.raw[,-c(1:7)]
+pml_testing.clean01 <-pml_testing.raw[,-c(1:7)]
+```
+Remove variables that have more than 50% NA's.
+```{r, remove var with >50% NAs}
+NA_columnIndex <- colSums(is.na(pml_training.clean01))/nrow(pml_training.clean01) > 0.5
+pml_training.clean02 <- pml_training.clean01[, !NA_columnIndex]
+```
+Check variables for any NA
+```{r, Check the varialbes for anymore NA}
+colSums(is.na(pml_training.clean02))/nrow(pml_training.clean02)
+```
+Now it is confirmed that no more NA in any variables.
+
+#### Feature Selection
+Remove highly correlated variables (cutoff=0.75).
+```{r, Feature selection}
+correlationMatrix <- cor(subset(pml_training.clean02, select=-classe))
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.75)
+train.clean <- pml_training.clean02[, -highlyCorrelated]
+```
+
+#### Change the test dataset keep only the same variables as final cleaed up training set
+```{r, clean test dataset}
+colNames <- names(subset(train.clean, select=-classe))
+test.clean <- pml_testing.clean01[,colNames]
+```
+
+#### Create partition of model fit and validation sets from train.clean dataset
+```{r, create partition}
+set.seed(12345)
+inTrainIndex <- createDataPartition(train.clean$classe, p=0.75)[[1]]
+train.training <- train.clean[inTrainIndex,]
+train.validation <- train.clean[-inTrainIndex,]
+```
+
+#### Classification with 3 models
+The training dataset will be fit with 3 Models (Tree, Random Forrest (rf), Boosted tree classificaiton (xgbTree) and the resulting models are then applied to the valdaiton dataset, the model with the best accuracy from the valdation will be selected as the final classification moel to predict the test dataset.
+
+#### Fit to Model #1: Tree
+```{r, Tree}
+treeMod <-train(classe ~., data=train.training, method="rpart", trControl=trainControl("cv", number=10), tuneLength=10)
+treePrediction <- predict(treeMod, train.validation)
+confusionMatrix(as.factor(train.validation$classe), treePrediction)
+```
+The accuracy of validation set by Tree model is 0.6332.
+
+##### Fit to Model #2: Random Forest
+```{r, rf}
+rfMod <- train(classe ~., method="rf", data=train.training)
+rfPrediction <- predict(rfMod, train.validation)
+confusionMatrix(as.factor(train.validation$classe), rfPrediction)
+```
+The accuracy of validation set by random forest model is 0.9935.
+
+##### Fit to Model #3: boosted tree classification from the xgboost pakage
+```{r, xgbTree}
+xgbMod <-train(classe ~., data=train.training, method="xgbTree")
+xgbPrediction <- predict(xgbMod, train.validation)
+confusionMatrix(as.factor(train.validation$classe), xgbPrediction)
+```
+The accuracy of validation by xgboost model is 0.9892.
+
+As shown, the random forest model gives the best accuracy, so it is selected for predict the test dataset. The relative importance of all used variables from the random forest model is given by
+
+```{r, var importance in rfMod}
+varImp(rfMod)$importance %>% 
+  mutate(Var=row.names(.)) %>%
+  arrange(-Overall) %>%
+  select(Var, Overall)
+```
+#### Predict the test dataset with rfMod
+```{r, rf prediction}
+predict(rfMod, test.clean)
+```
+#### Final Note:
+Both the rf and xgboost models take >1 hr computation time to execute, so the no cross validaiton (which will take extra computation time) were performed on these two methods. 
